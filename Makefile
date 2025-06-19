@@ -9,3 +9,5 @@ all: $(TARGET)
 $(TARGET): $(SOURCE)
 	$(CC) $(CLFAGS) -o $(BUILD_DIR)/$(TARGET) $(SOURCE)
 
+install:
+	cp $(BUILD_DIR)/$(TARGET) /usr/local/bin/
