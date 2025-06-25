@@ -10,6 +10,7 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
+#include <liburing.h>
 
 struct timespec start, end;
 
@@ -20,11 +21,13 @@ void skill(int sig) { run = 0; }
 enum tests {
   s_chunked_cpy = 0,
   send_cpy,
-  d_caches
+  d_caches,
+  uring_cpy
 };
 
 int S_CHUNKED_CPY = 1 << s_chunked_cpy;
 int SEND_CPY = 1 << send_cpy;
+int URING_CPY = 1 << uring_cpy;
 int DROP_CACHES = 1 << d_caches;
 
 void parse_tests(char tests[], int *flags) {
@@ -36,6 +39,9 @@ void parse_tests(char tests[], int *flags) {
       *flags |= S_CHUNKED_CPY;
     if (strcmp(token, "send") == 0)
       *flags |= SEND_CPY;
+    if (strcmp(token, "uring") == 0)
+      *flags |= URING_CPY;
+
 
   } while (token = strtok(NULL, ","));
 }
@@ -61,6 +67,72 @@ double copy_file_chunk(int r_file, int w_file, int page_size) {
   free(buffer);
   return elapsed;
 }
+
+double copy_file_uring(int r_file, int w_file, int page_size) {
+  size_t ret;
+  long long elapsed;
+  double elapsed_sec;
+  void *buffer;
+  struct io_uring ring;
+  struct io_uring_cqe *cqe;
+  struct iovec iov;
+  if (io_uring_queue_init(8, &ring, 0 ) < 0){
+    perror("io_uring_queue_init");
+    return 1;
+  }
+
+  if (posix_memalign(&buffer, page_size, page_size)) {
+    perror("posix_memalign");
+    return 1;
+  }
+ 
+  memset(buffer, 0, page_size);
+
+  iov.iov_base = buffer;
+  iov.iov_len = 1;
+
+  struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
+
+  if (!sqe){
+    io_uring_queue_exit(&ring);
+    return 1;
+  }
+
+  io_uring_prep_readv(sqe, r_file, &iov, 1, 0);
+
+  if (io_uring_submit(&ring) < 0) {
+    perror("io_uring_submit");
+    io_uring_queue_exit(&ring);
+    return 1;
+
+  }
+
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  if (io_uring_wait_cqe(&ring, &cqe) < 0) {
+    perror("io_uring_wait_cqe");
+    io_uring_queue_exit(&ring);
+    return 1;
+
+  }
+  clock_gettime(CLOCK_MONOTONIC, &end);
+
+  if (cqe-> res < 0) printf("read failed: %s \n", strerror(-cqe->res));
+  else {
+    printf("Read %d bytes: %s\n", cqe->res, buffer);
+  }
+
+  io_uring_cqe_seen(&ring, cqe);
+
+  io_uring_queue_exit(&ring);
+
+
+  elapsed = (end.tv_sec - start.tv_sec) * 1000000000LL +
+            (end.tv_nsec - start.tv_nsec);
+  free(buffer);
+  return elapsed;
+}
+
+
 
 double copy_file_sendfile(int r_file, int w_file, off_t size) {
   long long elapsed;
@@ -134,6 +206,10 @@ void run_tests(int r_file, int w_file, off_t size, int page_size,
     run_simple_chunked_copy(r_file, w_file, size, page_size);
   if (runflags & SEND_CPY)
     run_send(r_file, w_file, size);
+  if (runflags & URING_CPY)
+    copy_file_uring(r_file, w_file, size);
+
+
 }
 
 int main(int argc, char *argv[]) {
