@@ -5,6 +5,7 @@
 
 struct event_t {
   uint32_t pid;
+  uint64_t ts;
   char comm[128];
 };
 
@@ -17,6 +18,7 @@ struct {
 SEC("kprobe/arc_evict")
 int arc_evict(void *ctx) {
   struct event_t event = {};
+  event.ts = bpf_ktime_get_ns();
   event.pid = bpf_get_current_pid_tgid() >> 32;
   bpf_get_current_comm(event.comm, 128);
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
@@ -26,6 +28,7 @@ int arc_evict(void *ctx) {
 SEC("kprobe/perf_event_fork")
 int perf_event_fork(void *ctx) {
   struct event_t event = {};
+  event.ts = bpf_ktime_get_ns();
   event.pid = bpf_get_current_pid_tgid() >> 32;
   bpf_get_current_comm(event.comm, 128);
   if (bpf_strncmp(event.comm, sizeof(event.comm), "arc_evict") != 0) return 0;
@@ -36,6 +39,17 @@ int perf_event_fork(void *ctx) {
 SEC("tracepoint/syscalls/sys_enter_read")
 int sys_enter_read(void *ctx) {
   struct event_t event = {};
+  event.ts = bpf_ktime_get_ns();
+  event.pid = bpf_get_current_pid_tgid() >> 32;
+  bpf_get_current_comm(event.comm, 128);
+  bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));
+  return 0;
+}
+
+SEC("kprobe/mlx5_ib_post_send")
+int mlx5_ib_post_send(void *ctx) {
+  struct event_t event = {};
+  event.ts = bpf_ktime_get_ns();
   event.pid = bpf_get_current_pid_tgid() >> 32;
   bpf_get_current_comm(event.comm, 128);
   bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &event, sizeof(event));

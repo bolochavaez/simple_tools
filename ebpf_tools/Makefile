@@ -8,7 +8,7 @@ BUILD_DIR = build
 all: ebpf_program usl
 
 usl: $(SOURCE)
-	$(CC) $(CLFAGS) -o $(BUILD_DIR)/usl $(SOURCE)
+	$(CC) $(CFLAGS) -o $(BUILD_DIR)/usl $(SOURCE)
 
 ebpf_program: $(EBPF_SOURCE)
-	$(CC) $(EBPF_CLFAGS) -o $(BUILD_DIR)/arc_evict_tracer.o $(EBPF_SOURCE)
+	$(CC) $(EBPF_CFLAGS) -o $(BUILD_DIR)/arc_evict_tracer.o $(EBPF_SOURCE)

@@ -9,6 +9,7 @@
 
 struct event_t {
   uint32_t pid;
+  uint64_t ts;
   char comm[128];
 };
 
@@ -20,8 +21,8 @@ static void sig_handler(int sig) { running = false; }
 static void handle_event(void *ctx, int cpu, void *data, unsigned int data_sz) {
   struct event_t *event = data;
   counter += 1;
-  printf("%u,%s,", event->pid, event->comm);
-  printf("%d\n", counter);
+  printf("{ \"ts\":%lu, \"pid\":%u,\"command\":\"%s\", \"count\":",event->ts, event->pid, event->comm);
+  printf("%d}\n", counter);
 }
 
 struct bpf_link *handle_event_link(char *event, char *type,
