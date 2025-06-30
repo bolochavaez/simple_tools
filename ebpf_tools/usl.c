@@ -1,11 +1,15 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#include <sys/inotify.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+
+#define PID_MAX_SIZE 16
 
 struct event_t {
   uint32_t pid;
@@ -23,6 +27,60 @@ static void handle_event(void *ctx, int cpu, void *data, unsigned int data_sz) {
   counter += 1;
   printf("{ \"ts\":%lu, \"pid\":%u,\"command\":\"%s\", \"count\":",event->ts, event->pid, event->comm);
   printf("%d}\n", counter);
+}
+
+int init_pidfile(char * filename){
+    int pidfile;
+
+    pidfile = creat(filename, 0644);
+    if (pidfile < 0){
+        perror("could not init pidfile");
+	return -1;
+    }
+
+    close(pidfile);
+    return 0;
+
+}
+
+int wait_for_pidfile(char * filename){
+  char pidbuffer[PID_MAX_SIZE] = {0};
+  long filesize;
+  int pid;
+  int pidfile;
+  int watcher;
+  int bytes_read;
+  
+  if (init_pidfile(filename)){
+     perror("initializing pidfile failed:");
+     return -1;
+  }
+
+  pidfile = inotify_init();
+
+  if(pidfile < 0){
+     perror("opening the file failed:");
+     return -1;
+  }
+
+  watcher = inotify_add_watch(pidfile, filename, IN_MODIFY); 
+
+  if(watcher){
+     perror("adding the watcher failed:");
+     return -1;
+  }
+
+  printf("waiting for pidfile");
+  bytes_read = read(pidfile, pidbuffer, PID_MAX_SIZE);
+  if(bytes_read == PID_MAX_SIZE){
+    printf("this pidfile is too large");
+    pid = -1;
+  } else {
+    pid = atoi(pidbuffer);
+  }
+
+  close(pidfile);
+  return pid;
 }
 
 struct bpf_link *handle_event_link(char *event, char *type,
@@ -56,14 +114,16 @@ int main(int argc, char *argv[]) {
   struct perf_buffer *pb;
   int err;
   int opt;
+  int pid;
 
   char event[128] = {0};
   char etype[128] = {0};
+  char pidfile[128] = {0};
 
   signal(SIGINT, sig_handler);
   signal(SIGTERM, sig_handler);
 
-  while ((opt = getopt(argc, argv, "e:t:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:t:p:")) != -1) {
     switch (opt) {
     case 'e': {
       strcpy(event, optarg);
@@ -71,6 +131,10 @@ int main(int argc, char *argv[]) {
     }
     case 't': {
       strcpy(etype, optarg);
+      break;
+    }
+    case 'p': {
+      strcpy(pidfile, optarg);
       break;
     }
     default:
@@ -84,6 +148,14 @@ int main(int argc, char *argv[]) {
   if (strlen(etype) < 1) {
     printf("must have event type");
     return 1;
+  }
+  
+  if (strlen(pidfile) > 1) {
+      pid = wait_for_pidfile(pidfile);
+      if(pid < 0){
+        printf("error occured opening pidfile.");
+        exit(1);
+      }
   }
 
   printf("tracking event: %s", event);
