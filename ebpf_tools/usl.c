@@ -34,12 +34,10 @@ int init_pidfile(char * filename){
 
     pidfile = creat(filename, 0644);
     if (pidfile < 0){
-        perror("could not init pidfile");
+        perror("could not init pidfile: ");
 	return -1;
     }
-
-    close(pidfile);
-    return 0;
+    return pidfile;
 
 }
 
@@ -47,38 +45,41 @@ int wait_for_pidfile(char * filename){
   char pidbuffer[PID_MAX_SIZE] = {0};
   long filesize;
   int pid;
+  int pidfile_event;
   int pidfile;
   int watcher;
   int bytes_read;
   
-  if (init_pidfile(filename)){
+  if ((pidfile = init_pidfile(filename)) < 0 ){
      perror("initializing pidfile failed:");
      return -1;
   }
 
-  pidfile = inotify_init();
+  pidfile_event = inotify_init();
 
-  if(pidfile < 0){
-     perror("opening the file failed:");
+  if(pidfile_event < 0){
+     perror("opening the file event failed:");
      return -1;
   }
 
-  watcher = inotify_add_watch(pidfile, filename, IN_MODIFY); 
+  watcher = inotify_add_watch(pidfile_event, filename, IN_MODIFY); 
 
-  if(watcher){
+  if(watcher == -1){
      perror("adding the watcher failed:");
      return -1;
   }
 
-  printf("waiting for pidfile");
+  printf("waiting for pidfile\n");
+  read(pidfile_event, pidbuffer, PID_MAX_SIZE);
   bytes_read = read(pidfile, pidbuffer, PID_MAX_SIZE);
   if(bytes_read == PID_MAX_SIZE){
-    printf("this pidfile is too large");
+    printf("this pidfile is too large: %d \n", bytes_read);
     pid = -1;
   } else {
     pid = atoi(pidbuffer);
   }
 
+  close(pidfile_event);
   close(pidfile);
   return pid;
 }
@@ -153,7 +154,7 @@ int main(int argc, char *argv[]) {
   if (strlen(pidfile) > 1) {
       pid = wait_for_pidfile(pidfile);
       if(pid < 0){
-        printf("error occured opening pidfile.");
+        printf("error occured opening pidfile. \n");
         exit(1);
       }
   }
